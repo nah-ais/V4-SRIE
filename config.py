@@ -258,3 +258,13 @@ PROJECT_METADATA_FIELDS = [
 
 SS_PROJECT_METADATA = "project_metadata"  # dict: field -> value yang diisi panitia
 SS_METADATA_APPLIED = "project_metadata_applied"  # bool: sudah diterapkan ke dataset atau belum
+
+# =========================================================
+# 7. KONFIGURASI DATABASE MARIADB (XAMPP)
+# =========================================================
+DB_HOST = _get_secret(["database", "host"], "localhost")
+DB_PORT = _get_secret(["database", "port"], 3306)
+DB_USER = _get_secret(["database", "user"], "root")
+DB_PASSWORD = _get_secret(["database", "password"], "")
+DB_NAME = _get_secret(["database", "name"], "db_belajar")
+DB_TABLE = _get_secret(["database", "table_name"], "data_monitoring")
