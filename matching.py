@@ -99,14 +99,21 @@ def find_duplicate_pairs(
     progress_callback=None,
     dataset_label: str = "Login",
 ) -> pd.DataFrame:
-    """Global fuzzy pairwise matching for Login.
+    """Fuzzy pairwise matching untuk Login — DI-GATE PER KEGIATAN (WAJIB).
 
-    Semua pasangan dibandingkan. Tidak ada gate judul/tanggal sebelum scoring.
-    Event hanya digunakan sebagai konteks pada hasil review. Dengan demikian
-    peserta yang sama pada kegiatan berbeda tetap muncul sebagai kandidat bila
-    similarity >= threshold, tetapi reviewer dapat memilih Keep Both.
+    Pasangan HANYA dibandingkan similarity-nya jika `judul_kegiatan` DAN
+    `tanggal_kegiatan` SAMA PERSIS (lihat _event_key). Peserta yang sama di
+    kegiatan/tanggal BERBEDA TIDAK PERNAH menjadi kandidat duplikat sama
+    sekali — bukan cuma diberi label "kegiatan berbeda", supaya tombol
+    keputusan reviewer tidak bisa salah menghapus kehadiran valid di
+    kegiatan lain (sesuai keputusan: Register dicek unik secara global,
+    Login dicek unik PER KEGIATAN).
+
+    Sebagai lapis pengaman tambahan: jika custom_id tersedia di kedua baris
+    dan nilainya BERBEDA, pasangan tidak pernah dianggap duplikat meskipun
+    skor fuzzy tinggi (custom_id beda = orang berbeda).
     """
-    required = list(config.REQUIRED_MATCH_COLUMNS)
+    required = list(config.REQUIRED_MATCH_COLUMNS) + [config.DUPLICATE_GATE_COLUMN]
     missing_cols = [c for c in required if c not in df.columns]
     if missing_cols:
         raise ValueError(f"Kolom wajib untuk matching Login tidak ditemukan: {missing_cols}")
@@ -114,51 +121,73 @@ def find_duplicate_pairs(
         return pd.DataFrame()
 
     df_work = _ensure_row_uid(df, dataset_label)
+    df_work["_event_key"] = df_work.apply(lambda r: _event_key(r.to_dict()), axis=1)
+
+    # Kelompokkan index per event_key (judul_kegiatan + tanggal_kegiatan).
+    # Grup dengan key kosong ("||") diabaikan karena tidak bisa dipastikan sama.
+    group_indices: dict[str, list[int]] = {}
+    for event_key, group_df in df_work.groupby("_event_key"):
+        if event_key == "||":
+            continue
+        idx_list = group_df.index.tolist()
+        if len(idx_list) > 1:
+            group_indices[event_key] = idx_list
+
+    if not group_indices:
+        return pd.DataFrame()
+
     records = df_work.to_dict("records")
-    total_pairs = len(records) * (len(records) - 1) // 2
+    total_pairs = sum(len(idxs) * (len(idxs) - 1) // 2 for idxs in group_indices.values())
     results: list[dict] = []
     processed = 0
 
-    for i, j in combinations(range(len(records)), 2):
-        rec_a, rec_b = _ordered_pair(records[i], records[j])
-        scores = compute_pair_score(rec_a, rec_b)
-        processed += 1
-        if progress_callback and (processed % 200 == 0 or processed == total_pairs):
-            progress_callback(processed, total_pairs)
-        if scores["final_score"] < threshold:
-            continue
-        same_event = _event_key(rec_a) == _event_key(rec_b) and _event_key(rec_a) != "||"
-        results.append({
-            "pair_id": f"{dataset_label}__{rec_a.get('_row_uid')}__{rec_b.get('_row_uid')}",
-            "dataset": dataset_label,
-            "row_uid_a": rec_a.get("_row_uid"),
-            "row_uid_b": rec_b.get("_row_uid"),
-            "id_a": rec_a.get("id_kobo"),
-            "id_b": rec_b.get("id_kobo"),
-            "custom_id_a": rec_a.get("custom_id"),
-            "custom_id_b": rec_b.get("custom_id"),
-            "judul_kegiatan_a": rec_a.get("judul_kegiatan"),
-            "judul_kegiatan_b": rec_b.get("judul_kegiatan"),
-            "tanggal_kegiatan_a": rec_a.get("tanggal_kegiatan"),
-            "tanggal_kegiatan_b": rec_b.get("tanggal_kegiatan"),
-            "same_event": same_event,
-            "nama_a": rec_a.get("nama"),
-            "nama_b": rec_b.get("nama"),
-            "tanggal_lahir_a": rec_a.get("tanggal_lahir"),
-            "tanggal_lahir_b": rec_a.get("tanggal_lahir") if False else rec_b.get("tanggal_lahir"),
-            "kelurahan_a": rec_a.get("kelurahan"),
-            "kelurahan_b": rec_b.get("kelurahan"),
-            "area_program_a": rec_a.get("area_program"),
-            "area_program_b": rec_b.get("area_program"),
-            "timestamp_submit_a": rec_a.get("timestamp_submit"),
-            "timestamp_submit_b": rec_b.get("timestamp_submit"),
-            **scores,
-            "status": "Potensi Double Count" if same_event else "Peserta Sama / Kegiatan Berbeda - Review",
-        })
+    for idx_list in group_indices.values():
+        for i, j in combinations(idx_list, 2):
+            rec_a, rec_b = _ordered_pair(records[i], records[j])
+            processed += 1
+            if progress_callback and (processed % 200 == 0 or processed == total_pairs):
+                progress_callback(processed, total_pairs)
+
+            # Lapis keamanan tambahan: custom_id beda -> pasti bukan duplikat.
+            cid_a, cid_b = _clean_text(rec_a.get("custom_id")), _clean_text(rec_b.get("custom_id"))
+            if cid_a and cid_b and cid_a != cid_b:
+                continue
+
+            scores = compute_pair_score(rec_a, rec_b)
+            if scores["final_score"] < threshold:
+                continue
+
+            results.append({
+                "pair_id": f"{dataset_label}__{rec_a.get('_row_uid')}__{rec_b.get('_row_uid')}",
+                "dataset": dataset_label,
+                "row_uid_a": rec_a.get("_row_uid"),
+                "row_uid_b": rec_b.get("_row_uid"),
+                "id_a": rec_a.get("id_kobo"),
+                "id_b": rec_b.get("id_kobo"),
+                "custom_id_a": rec_a.get("custom_id"),
+                "custom_id_b": rec_b.get("custom_id"),
+                "judul_kegiatan_a": rec_a.get("judul_kegiatan"),
+                "judul_kegiatan_b": rec_b.get("judul_kegiatan"),
+                "tanggal_kegiatan_a": rec_a.get("tanggal_kegiatan"),
+                "tanggal_kegiatan_b": rec_b.get("tanggal_kegiatan"),
+                "same_event": True,  # selalu True: gate di atas menjamin ini
+                "nama_a": rec_a.get("nama"),
+                "nama_b": rec_b.get("nama"),
+                "tanggal_lahir_a": rec_a.get("tanggal_lahir"),
+                "tanggal_lahir_b": rec_b.get("tanggal_lahir"),
+                "kelurahan_a": rec_a.get("kelurahan"),
+                "kelurahan_b": rec_b.get("kelurahan"),
+                "area_program_a": rec_a.get("area_program"),
+                "area_program_b": rec_b.get("area_program"),
+                "timestamp_submit_a": rec_a.get("timestamp_submit"),
+                "timestamp_submit_b": rec_b.get("timestamp_submit"),
+                **scores,
+                "status": "Potensi Double Count",
+            })
 
     if not results:
         return pd.DataFrame()
-    return pd.DataFrame(results).sort_values(["final_score", "same_event"], ascending=[False, False]).reset_index(drop=True)
+    return pd.DataFrame(results).sort_values("final_score", ascending=False).reset_index(drop=True)
 
 
 def find_duplicate_pairs_register(
