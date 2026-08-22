@@ -660,10 +660,52 @@ def _find_column_by_content_markers(df: pd.DataFrame, all_markers: list[str]) ->
 # Alias field ID kustom mentah dari Kobo (mis. hasil dynamic data attachment
 # `instance()` pada form Login yang mengambil ID dari Register). Nama field
 # asli di Kobo bisa bervariasi tergantung setup form, jadi dicari via alias.
+# Alias field ID kustom mentah dari Kobo. Nama field ASLI sudah dikonfirmasi
+# langsung dari API live:
+#   - Login    : "cek_ID"    (hasil lookup otomatis form "Login: Verifikasi Peserta")
+#   - Register : "group_digital_absensi/group_informasi_respondent/custom_id"
+# Keduanya SUDAH langsung dipetakan ke kolom 'custom_id' lewat
+# LOGIN_COLUMN_MAP / REGISTER_COLUMN_MAP di config.py — jadi dalam kondisi
+# normal kolom 'custom_id' semestinya SUDAH terisi benar sebelum resolver
+# ini bahkan dijalankan. Daftar alias di bawah HANYA berfungsi sebagai
+# jaring pengaman kalau suatu saat field-nya berganti nama di Kobo.
+#
+# PENTING (bug fix, jangan tambah alias generik lagi): field ID SENGAJA
+# dicari dengan EXACT MATCH SAJA (lihat _resolve_custom_id_column_exact),
+# TIDAK memakai fallback token/substring seperti field BTT lain — karena
+# salah tebak kolom ID berakibat fatal (identitas peserta bisa tertukar
+# masal). Ini pernah terjadi: alias generik seperti "id_peserta" pernah
+# ke-fallback-match ke kolom "kategori_peserta" yang sama sekali bukan ID.
 CUSTOM_ID_FIELD_ALIASES = [
-    "custom_id", "cek_ID", "cek_id", "CekID", "id_peserta", "ID_Peserta",
-    "id_kustom", "participant_id", "ID Peserta", "kode_id", "kode_peserta",
+    "custom_id", "cek_ID", "cek_id", "CekID", "id_kustom", "participant_id", "kode_id",
 ]
+
+
+def _resolve_custom_id_column_exact(df: pd.DataFrame, aliases: list[str]) -> str | None:
+    """
+    Cari kolom ID di `df` dengan EXACT NORMALIZED MATCH SAJA — TIDAK ADA
+    fallback token/substring seperti _resolve_register_column. Sengaja
+    lebih ketat karena field ID terlalu sensitif untuk ditebak.
+
+    Mengembalikan kolom pertama (sesuai urutan `aliases`) yang cocok exact
+    DAN punya minimal satu nilai berisi. Jika tidak ada yang berisi,
+    kembalikan kandidat exact-match pertama yang ditemukan (meski kosong)
+    sebagai fallback netral, atau None jika tidak ada satu pun yang cocok.
+    """
+    if df.empty:
+        return None
+
+    normalized = {_normalize_field_name(col): col for col in df.columns}
+    empty_fallback = None
+    for alias in aliases:
+        key = _normalize_field_name(alias)
+        if key in normalized:
+            col = normalized[key]
+            if _column_has_data(df, col):
+                return col
+            if empty_fallback is None:
+                empty_fallback = col
+    return empty_fallback
 
 
 def resolve_custom_id_column(df: pd.DataFrame) -> pd.DataFrame:
@@ -677,12 +719,17 @@ def resolve_custom_id_column(df: pd.DataFrame) -> pd.DataFrame:
 
     Jika kolom 'custom_id' sudah ada dan sudah terisi, tidak ada perubahan.
     Jika kosong tapi ditemukan kolom alias mentah, nilainya diisi dari sana.
+
+    CATATAN: pencarian kolom di sini EXACT MATCH SAJA (lihat
+    _resolve_custom_id_column_exact) — TIDAK memakai fallback token-substring
+    seperti field BTT lain, supaya custom_id tidak pernah tertukar dengan
+    kolom lain yang kebetulan mengandung kata serupa.
     """
     if df.empty:
         return df
 
     df = df.copy()
-    resolved_col = _resolve_register_column(df, CUSTOM_ID_FIELD_ALIASES)
+    resolved_col = _resolve_custom_id_column_exact(df, CUSTOM_ID_FIELD_ALIASES)
 
     if "custom_id" not in df.columns:
         df["custom_id"] = ""
