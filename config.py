@@ -139,40 +139,94 @@ assert abs((WEIGHT_NAMA_REG + WEIGHT_DOB_REG + WEIGHT_KEPALA_KELUARGA_REG) - 1.0
 DUPLICATE_THRESHOLD = 95.0  # >= nilai ini => "Potensi Double Count"
 
 # =========================================================
-# 4. KOBOTOOLBOX API DEFAULT
+# 4. KOBOTOOLBOX API — DIBACA DARI st.secrets (BUKAN HARDCODE)
 # =========================================================
-# Ambil token API di: https://kf.kobotoolbox.org/token/?format=json
-# CATATAN KEAMANAN: menyimpan token langsung di source code hanya disarankan
-# untuk penggunaan lokal/internal. Untuk deployment (Streamlit Cloud, dsb),
-# gunakan st.secrets atau environment variable, JANGAN commit token ke repo publik.
-KOBO_TOKEN = "c710cac4d6d5fafbda973f04b30a2c27bda914c4"  # ganti dengan token API pribadi Anda
+# Semua kredensial (token & Asset UID) SEKARANG dibaca dari st.secrets, bukan
+# ditulis langsung di file ini — supaya token TIDAK ikut ter-commit ke Git,
+# dan supaya menambah Area Program (AP) baru cukup edit secrets.toml TANPA
+# perlu mengubah kode Python sama sekali.
+#
+# CARA MENGISI (lihat juga secrets.toml.example di root proyek):
+#   1. Buat file .streamlit/secrets.toml (LOKAL) — atau isi lewat menu
+#      "Settings -> Secrets" di Streamlit Community Cloud (DEPLOY).
+#   2. Isi strukturnya seperti ini:
+#
+#        [kobo]
+#        default_token = "token_utama_anda"
+#        default_login_uid = "asset_uid_form_login_default"
+#        default_register_uid = "asset_uid_form_register_default"
+#
+#        [kobo.ap.AP-Surabaya]
+#        token = "token_khusus_AP_Surabaya"          # boleh dikosongkan -> pakai default_token
+#        login_uid = "asset_uid_login_AP_Surabaya"
+#        register_uid = "asset_uid_register_AP_Surabaya"
+#
+#        [kobo.ap."AP-Kalimantan Barat"]
+#        token = "token_khusus_AP_Kalbar"
+#        login_uid = "asset_uid_login_AP_Kalbar"
+#        register_uid = "asset_uid_register_AP_Kalbar"
+#
+#   3. Mau tambah AP baru? Tinggal tambah blok [kobo.ap.NamaAP_Baru] lagi di
+#      secrets.toml — dropdown di sidebar app.py OTOMATIS menyesuaikan,
+#      tidak perlu edit config.py atau app.py sama sekali.
+#
+# CATATAN: file .streamlit/secrets.toml TIDAK BOLEH ikut di-commit ke Git
+# (masukkan ke .gitignore). Untuk deploy di Streamlit Community Cloud, isi
+# lewat menu Secrets di dashboard, bukan file fisik di repo.
+try:
+    import streamlit as st
+    _SECRETS_AVAILABLE = True
+except ImportError:  # config.py bisa saja diimpor di luar konteks Streamlit (mis. testing)
+    _SECRETS_AVAILABLE = False
 
-KOBO_ENDPOINT = "https://kf.kobotoolbox.org/api/v2"
+
+def _get_secret(path: list, default=None):
+    """Ambil nilai bersarang dari st.secrets dengan aman; fallback ke `default`
+    kalau secrets.toml belum diisi/tidak ditemukan, supaya app tetap bisa
+    jalan (dengan field kosong) alih-alih crash saat pertama kali setup."""
+    if not _SECRETS_AVAILABLE:
+        return default
+    try:
+        node = st.secrets
+        for key in path:
+            node = node[key]
+        return node
+    except Exception:
+        return default
+
+
+KOBO_TOKEN = _get_secret(["kobo", "default_token"], "")
+KOBO_ENDPOINT = _get_secret(["kobo", "default_base_url"], "https://kf.kobotoolbox.org/api/v2")
 KOBO_API_BASE_URL = KOBO_ENDPOINT  # alias, dipakai oleh kobo_api.py
 
-# Asset UID (Form UID) masing-masing form Kobo.
-# Setiap form punya UID unik yang bisa dilihat di URL form tersebut
-# di dashboard KoboToolbox (kf.kobotoolbox.org/#/forms/<UID>/...).
-FORM_UID_REGISTRASI = "aRVadKAkpz2PYMaZH2gXKU"  # Form UID khusus Registrasi
-FORM_UID_LOGIN = "aE3xS8zXQsU9KQsiT9T7PA"  # TODO: isi dengan Form UID khusus Login/Absensi Anda
+FORM_UID_REGISTRASI = _get_secret(["kobo", "default_register_uid"], "")
+FORM_UID_LOGIN = _get_secret(["kobo", "default_login_uid"], "")
 
 KOBO_REQUEST_TIMEOUT = 30  # detik
 
 # =========================================================
-# 4b. MAPPING AREA PROGRAM (AP) -> ASSET UID (LOGIN & REGISTER)
+# 4b. MAPPING AREA PROGRAM (AP) -> TOKEN + ASSET UID (LOGIN & REGISTER)
 # =========================================================
-# Tambahkan/ubah daftar AP di sini. Panitia tinggal pilih dari dropdown
-# di sidebar, lalu Asset UID Login & Register akan terisi otomatis.
-AP_ASSET_MAP = {
-    "AP-Surabaya": {
-        "login": "ISI_ASSET_UID_LOGIN_SURABAYA",
-        "register": "ISI_ASSET_UID_REGISTER_SURABAYA",
-    },
-    "AP-Kalimantan Barat": {
-        "login": "ISI_ASSET_UID_LOGIN_KALBAR",
-        "register": "ISI_ASSET_UID_REGISTER_KALBAR",
-    },
-}
+# Dibangun OTOMATIS dari st.secrets["kobo"]["ap"][...] — lihat contoh format
+# di atas. Setiap AP boleh punya token SENDIRI (mis. akun Kobo terpisah per
+# wilayah) atau tidak diisi sama sekali (akan pakai default_token).
+def _build_ap_asset_map() -> dict:
+    ap_secrets = _get_secret(["kobo", "ap"], {})
+    result = {}
+    try:
+        items = ap_secrets.items()
+    except AttributeError:
+        items = []
+    for ap_name, values in items:
+        result[ap_name] = {
+            "token": values.get("token") or KOBO_TOKEN,
+            "login": values.get("login_uid", ""),
+            "register": values.get("register_uid", ""),
+        }
+    return result
+
+
+AP_ASSET_MAP = _build_ap_asset_map()
 
 # =========================================================
 # 5. SESSION STATE KEYS (biar konsisten, hindari typo string literal)
