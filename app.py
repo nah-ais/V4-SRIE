@@ -31,7 +31,6 @@ from data_processor import (
     resolve_custom_id_column,
     resolve_register_duplicate,
     append_register_to_login,
-    restore_pre_merge_login_register,
     add_fiscal_columns,
     add_month_first_column,
     add_participant_profile_columns,
@@ -745,31 +744,21 @@ def render_export_step() -> None:
     if not df_btt.empty and pd.isna(df_btt["Output Code"].iloc[0]) and metadata.get("Activity Code", "").strip():
         st.warning("⚠️ Kolom 'Output Code' kosong karena format 'Activity Code' belum sesuai xx.xx.xx.")
 
-    # PENTING: sheet BTT di atas SENGAJA memakai df_login yang SUDAH
-    # di-Auto-Append (gabungan Login + baris Register yang belum tercatat
-    # hadir), supaya kehadiran di BTT lengkap. Tapi untuk sheet EXPORT "Login"
-    # dan "Register" sendiri, dataset dikembalikan dulu ke bentuk TERPISAH
-    # seperti sebelum proses Auto-Append (baris hasil salinan dari Register
-    # dibuang dari Login) — hasil pembersihan/dedup TETAP dipertahankan,
-    # hanya struktur gabungannya yang di-undo. Lihat
-    # data_processor.restore_pre_merge_login_register().
-    df_login_export, df_register_export = restore_pre_merge_login_register(df_login, df_register)
-
     st.subheader("Download")
     col1, col2, col3 = st.columns(3)
     with col1:
         st.download_button(
-            "📄 Login Clean CSV", data=to_csv_bytes(df_login_export),
+            "📄 Login Clean CSV", data=to_csv_bytes(df_login),
             file_name="login_clean.csv", mime="text/csv", use_container_width=True,
         )
     with col2:
         st.download_button(
-            "📄 Register Clean CSV", data=to_csv_bytes(df_register_export),
+            "📄 Register Clean CSV", data=to_csv_bytes(df_register),
             file_name="register_clean.csv", mime="text/csv", use_container_width=True,
         )
     with col3:
         try:
-            excel_data = to_excel_bytes({"Login": df_login_export, "Register": df_register_export, "BTT": df_btt})
+            excel_data = to_excel_bytes({"Login": df_login, "Register": df_register, "BTT": df_btt})
             st.download_button(
                 "📊 Excel Lengkap", data=excel_data,
                 file_name="dataset_kehadiran_clean.xlsx",
