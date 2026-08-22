@@ -22,6 +22,9 @@ LOGIN_COLUMN_MAP = {
     "group_ys5yz58/Area_Program": "area_program",
     "group_ys5yz58/Judul_Kegiatan": "judul_kegiatan",
     "group_ys5yz58/Tanggal_Kegiatan": "tanggal_kegiatan",
+    # ID hasil lookup otomatis form "Login: Verifikasi Peserta" — dikonfirmasi
+    # langsung dari API live (asset_uid aE3xS8zXQsU9KQsiT9T7PA).
+    "cek_ID": "custom_id",
 }
 
 REGISTER_COLUMN_MAP = {
@@ -42,6 +45,9 @@ REGISTER_COLUMN_MAP = {
     "group_digital_absensi/group_wx4wq68/Tanggal_Kegiatan": "tanggal_kegiatan",
     "group_digital_absensi/group_informasi_respondent/Apakah_Anda_memiliki_kebutuhan": "tipe_disabilitas",
     "group_digital_absensi/group_informasi_respondent/Kategori_Peserta": "kategori_peserta",
+    # ID unik peserta — dikonfirmasi langsung dari API live
+    # (asset_uid aRVadKAkpz2PYMaZH2gXKU). Contoh nilai: 'SBY-260820-40d'.
+    "group_digital_absensi/group_informasi_respondent/custom_id": "custom_id",
 }
 
 # =========================================================
