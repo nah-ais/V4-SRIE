@@ -139,28 +139,46 @@ def render_sidebar() -> float:
 # LANGKAH ①: MUAT DATA
 # =========================================================
 def _render_kobo_api_form() -> None:
-    """Form untuk menarik data langsung dari KoboToolbox API, dengan preset Area Program."""
+    """Form untuk menarik data langsung dari KoboToolbox API, dengan preset Area Program.
+
+    Token & Asset UID diambil dari st.secrets (lihat config.py bagian 4/4b) —
+    memilih AP di dropdown otomatis mengisi token+UID khusus AP itu (kalau
+    diisi di secrets.toml), atau fallback ke token/UID default.
+    """
     ap_options = ["(Manual)"] + list(config.AP_ASSET_MAP.keys())
     selected_ap = st.selectbox(
         "Area Program",
         ap_options,
-        help="Memilih AP akan otomatis mengisi Asset UID Login & Register di bawah.",
+        help="Memilih AP akan otomatis mengisi Token & Asset UID Login/Register dari secrets.toml.",
     )
 
+    default_token = config.KOBO_TOKEN
     default_login = config.FORM_UID_LOGIN
     default_register = config.FORM_UID_REGISTRASI
     if selected_ap != "(Manual)":
-        default_login = config.AP_ASSET_MAP[selected_ap]["login"]
-        default_register = config.AP_ASSET_MAP[selected_ap]["register"]
+        ap_cfg = config.AP_ASSET_MAP[selected_ap]
+        default_token = ap_cfg.get("token") or config.KOBO_TOKEN
+        default_login = ap_cfg["login"]
+        default_register = ap_cfg["register"]
+
+    if not config.AP_ASSET_MAP:
+        st.caption(
+            "ℹ️ Belum ada Area Program yang terdaftar di secrets.toml. "
+            "Isi kredensial secara manual di bawah, atau tambahkan blok "
+            "`[kobo.ap.NamaAP]` di secrets.toml supaya muncul di dropdown ini."
+        )
 
     with st.form("load_kobo_form"):
         col1, col2 = st.columns(2)
         with col1:
-            api_token = st.text_input("API Token", value=config.KOBO_TOKEN, type="password")
+            # key disertakan `selected_ap` supaya nilai default (termasuk token)
+            # ikut ter-refresh setiap kali AP diganti, bukan menyimpan input
+            # lama dari AP sebelumnya.
+            api_token = st.text_input(
+                "API Token", value=default_token, type="password", key=f"token_{selected_ap}"
+            )
             base_url = st.text_input("Base URL", value=config.KOBO_ENDPOINT)
         with col2:
-            # key disertakan `selected_ap` supaya nilai default ikut ter-refresh
-            # setiap kali AP diganti, bukan menyimpan input lama dari AP sebelumnya.
             asset_login = st.text_input("Asset UID Login", value=default_login, key=f"uid_login_{selected_ap}")
             asset_register = st.text_input("Asset UID Register", value=default_register, key=f"uid_register_{selected_ap}")
 
