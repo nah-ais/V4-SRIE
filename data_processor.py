@@ -380,14 +380,49 @@ MVC_MARKERS = {
     ],
 }
 
+# BENTUK DATA ASLI (dikonfirmasi pengguna): field
+# "group_digital_absensi/group_ys2ge24/group_cn7re50/Apakah_anak_keluarga_i_kerenta"
+# adalah pertanyaan select_multiple KOBO — nilainya berupa TOKEN PENDEK
+# dipisah SPASI (bukan frasa label), contoh: "Dimensi1 Dimensi3 Dimensi4"
+# (artinya peserta ini tercentang di Dimensi 1, 3, dan 4; Dimensi 2 = No).
+# Dicocokkan sebagai TOKEN UTUH (whole-word), bukan substring sembarangan,
+# supaya "Dimensi1" tidak salah ikut mencocokkan "Dimensi10" dkk.
+MVC_DIMENSION_TOKENS = {
+    "MVC- Dimensi 1": "dimensi1",
+    "MVC- Dimensi 2": "dimensi2",
+    "MVC- Dimensi 3": "dimensi3",
+    "MVC- Dimensi 4": "dimensi4",
+}
 
-def _mvc_flag(raw_text, markers: list[str]) -> str:
-    """'Yes' jika salah satu marker (substring, case-insensitive) ditemukan di
-    dalam jawaban gabungan _MVC_Raw, selain itu 'No'."""
+
+def _mvc_flag(raw_text, dimension_field: str) -> str:
+    """
+    'Yes' jika dimensi ini tercentang di jawaban gabungan _MVC_Raw, selain
+    itu 'No'. Mendukung DUA kemungkinan bentuk data sekaligus (robust
+    terhadap variasi export Kobo):
+      1. Token pendek dipisah spasi, format API asli — mis. "Dimensi1
+         Dimensi3 Dimensi4" (dicocokkan sebagai token utuh/whole-word).
+      2. Frasa label panjang (format export LABEL/CSV lama) — mis.
+         "kesulitan ekonomi..." (dicocokkan sebagai substring, seperti
+         sebelumnya, untuk kompatibilitas mundur).
+    """
     if _is_empty(raw_text):
         return "No"
     text = str(raw_text).strip().lower()
-    return "Yes" if any(marker.lower() in text for marker in markers) else "No"
+
+    # 1) Cocokkan token utuh "dimensiN" (bentuk data asli terkonfirmasi).
+    dimension_token = MVC_DIMENSION_TOKENS.get(dimension_field)
+    if dimension_token:
+        tokens = text.replace(",", " ").split()
+        if dimension_token in tokens:
+            return "Yes"
+
+    # 2) Fallback: cocokkan frasa label panjang (kompatibilitas mundur).
+    phrase_markers = MVC_MARKERS.get(dimension_field, [])
+    if any(marker.lower() in text for marker in phrase_markers):
+        return "Yes"
+
+    return "No"
 
 
 SP_MARKERS = {
@@ -689,7 +724,7 @@ def _build_register_profile_lookup(df_register: pd.DataFrame):
     # Nama kolom (field_source dari alias di atas) hanya dipakai sebagai
     # fallback TERAKHIR kalau deteksi berbasis isi data sama sekali tidak
     # menemukan kolom yang cocok.
-    all_mvc_markers = [m for markers in MVC_MARKERS.values() for m in markers]
+    all_mvc_markers = [m for markers in MVC_MARKERS.values() for m in markers] + list(MVC_DIMENSION_TOKENS.values())
     mvc_content_col = _find_column_by_content_markers(reg, all_mvc_markers)
     field_source["_MVC_Raw"] = mvc_content_col or field_source.get("_MVC_Raw")
 
@@ -777,8 +812,8 @@ def add_participant_profile_columns(df_login: pd.DataFrame, df_register: pd.Data
     # Deteksi 4 dimensi kerentanan (MVC) dari jawaban gabungan "_MVC_Raw" via
     # substring match (MVC_MARKERS) — sama alasannya dengan SP di atas.
     mvc_raw_values = [profile.get("_MVC_Raw", "") for profile in profiles]
-    for field, markers in MVC_MARKERS.items():
-        df[field] = [_mvc_flag(raw, markers) for raw in mvc_raw_values]
+    for field in MVC_MARKERS:
+        df[field] = [_mvc_flag(raw, field) for raw in mvc_raw_values]
 
     # Standarisasi Sex: Laki-laki -> Male, Perempuan -> Female.
     df["Sex"] = df["Sex"].apply(_sex_label)
