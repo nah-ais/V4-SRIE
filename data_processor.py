@@ -910,56 +910,6 @@ def add_btt_register_columns(df_login: pd.DataFrame, df_register: pd.DataFrame) 
     return add_participant_profile_columns(df_login, df_register)
 
 
-def restore_pre_merge_login_register(
-    df_login: pd.DataFrame,
-    df_register: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Mengembalikan Login & Register ke BENTUK TERPISAH seperti sebelum proses
-    Auto-Append (lihat append_register_to_login), TAPI TETAP mempertahankan
-    semua hasil pembersihan (dedup, review keputusan, canonical custom_id)
-    yang sudah terjadi sepanjang alur.
-
-    Latar belakang: fitur Auto-Append di langkah Finalisasi menyalin baris
-    Register (peserta yang terdaftar tapi belum tercatat hadir) ke dalam
-    dataset Login, supaya sheet BTT punya data kehadiran yang lengkap. Baris
-    hasil salinan ini TETAP membawa `_row_uid` ASLINYA dari Register (format
-    "Register__<n>", lihat _ensure_row_uid di matching.py) — bukan diberi
-    _row_uid baru — sehingga baris-baris ini bisa dikenali dan dipisahkan
-    kembali secara andal.
-
-    Dipakai KHUSUS untuk sheet export "Login" dan "Register" (supaya kedua
-    sheet itu merepresentasikan dataset asli masing-masing form, bukan hasil
-    gabungan). Sheet BTT TIDAK memakai fungsi ini — BTT tetap harus memakai
-    dataset Login yang SUDAH di-Auto-Append, karena BTT butuh data kehadiran
-    yang lengkap (termasuk peserta yang datanya berasal dari Register).
-
-    Returns
-    -------
-    (df_login_asli, df_register) :
-        df_login_asli — hanya baris Login yang GENUINE (baris hasil
-        Auto-Append dari Register DIBUANG dari sini), dedup/review tetap
-        berlaku (baris yang sudah dihapus reviewer TETAP tidak muncul).
-        df_register — dikembalikan apa adanya (Auto-Append tidak pernah
-        menghapus atau mengubah baris Register, jadi tidak perlu diproses).
-    """
-    login_out = df_login.copy()
-
-    if "_row_uid" in login_out.columns:
-        is_appended_from_register = (
-            login_out["_row_uid"].notna()
-            & login_out["_row_uid"].astype(str).str.startswith("Register__")
-        )
-        login_out = login_out[~is_appended_from_register].reset_index(drop=True)
-    # Kalau kolom _row_uid tidak ada sama sekali (mis. dataset lama/edge case),
-    # tidak ada cara aman untuk membedakan baris asli vs hasil append -> kembalikan
-    # apa adanya supaya tidak salah membuang data.
-
-    register_out = df_register.copy()
-
-    return login_out, register_out
-
-
 def resolve_register_duplicate(
     df_login: pd.DataFrame,
     df_register: pd.DataFrame,
