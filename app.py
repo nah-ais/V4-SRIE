@@ -43,6 +43,7 @@ from services.workflow_service import (
     reset_after_new_data,
     go_to,
     all_reviewed,
+    reviewed_count,
     step_status,
 )
 from ui.components import inject_css, page_header, workflow_bar, metric_row, empty_state
@@ -690,6 +691,29 @@ def render_export_step() -> None:
     df_login = st.session_state[config.SS_LOGIN_DF].copy()
     df_register = st.session_state[config.SS_REGISTER_DF].copy()
     metadata = st.session_state[config.SS_PROJECT_METADATA]
+
+    # Peringatan: BTT (khususnya kolom profil dari Register: Household Name,
+    # Sex, Age, MVC, dst.) hanya AKURAT kalau Register sudah benar-benar unik
+    # (tidak ada duplikat tersisa). Kalau masih ada pasangan yang belum
+    # direview, satu orang bisa saja masih punya >1 baris Register — sistem
+    # akan mengambil data dari salah satunya secara sembarang (lihat catatan
+    # di resolve_register_duplicate / _build_register_profile_lookup).
+    login_pairs = st.session_state[config.SS_DUPLICATE_PAIRS_LOGIN]
+    register_pairs = st.session_state[config.SS_DUPLICATE_PAIRS_REGISTER]
+    login_done = all_reviewed(login_pairs, st.session_state[config.SS_REVIEW_DECISIONS_LOGIN])
+    register_done = all_reviewed(register_pairs, st.session_state[config.SS_REVIEW_DECISIONS_REGISTER])
+
+    if not register_done:
+        pending_count = len(register_pairs) - reviewed_count(register_pairs, st.session_state[config.SS_REVIEW_DECISIONS_REGISTER])
+        st.warning(
+            f"⚠️ Masih ada **{pending_count} pasangan Register** yang belum direview (lihat langkah ④). "
+            "Selama Register belum benar-benar unik, kolom profil di sheet BTT (Household Name, Sex, "
+            "Age, MVC, dsb.) bisa mengambil data dari baris yang salah. Sebaiknya selesaikan review "
+            "Register dulu sebelum export."
+        )
+    if not login_done:
+        pending_count = len(login_pairs) - reviewed_count(login_pairs, st.session_state[config.SS_REVIEW_DECISIONS_LOGIN])
+        st.warning(f"⚠️ Masih ada **{pending_count} pasangan Login** yang belum direview (lihat langkah ③).")
 
     st.success("✅ Data siap diekspor.")
     metric_row([
