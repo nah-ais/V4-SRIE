@@ -1131,3 +1131,95 @@ def to_excel_bytes(sheets: dict[str, pd.DataFrame]) -> bytes:
             "Library 'xlsxwriter' belum terpasang. Jalankan: pip install xlsxwriter"
         ) from e
     return buffer.getvalue()
+
+from sqlalchemy import create_engine
+
+# Mapping kolom BTT resmi -> nama kolom tabel MariaDB
+BTT_TO_SQL_MAP = {
+    "Implementor": "implementor",
+    "Sector": "sector",
+    "CPM": "cpm",
+    "Project": "project",
+    "Project Category": "project_category",
+    "Output Code": "output_code",
+    "Activity Code": "activity_code",
+    "Activity": "activity",
+    "Activity Detail": "activity_detail",
+    "Date": "activity_date",
+    "Month": "month",
+    "Month (First)": "month_first",
+    "Fiscal Year": "fiscal_year",
+    "ID": "id",
+    "Full Name": "full_name",
+    "Household Name": "household_name",
+    "Sex": "sex",
+    "Age": "age",
+    "Age group": "age_group",
+    "Category": "category",
+    "Disability Category": "disability_category",
+    "Disability Status": "disability_status",
+    "RC": "rc",
+    "RC Status": "rc_status",
+    "IDN": "idn",
+    "MVC- Dimensi 1": "mvc_dimensi_1",
+    "MVC- Dimensi 2": "mvc_dimensi_2",
+    "MVC- Dimensi 3": "mvc_dimensi_3",
+    "MVC- Dimensi 4": "mvc_dimensi_4",
+    "MVC": "mvc",
+    "Social Protection": "social_protection",
+    "SP - Cash transfers/food assistance": "sp_cash_transfers_food_assistance",
+    "SP - Health assistance": "sp_health_assistance",
+    "SP - Education Assistance": "sp_education_assistance",
+    "Institution": "institution",
+    "Position": "position",
+    "No.Handphone (WA)": "no_handphone",
+    "# Child <5": "child_under_5",
+    "# Child 6-11": "child_6_11",
+    "# Child 12-17": "child_12_17",
+}
+
+
+def export_btt_to_mariadb(df_btt: pd.DataFrame, host: str, port: int, user: str, password: str, db_name: str, table_name: str) -> tuple[bool, str]:
+    """
+    Mengekspor DataFrame BTT ke tabel MariaDB/MySQL lokal.
+    Mengembalikan tuple (status_sukses, pesan_keterangan).
+    """
+    if df_btt.empty:
+        return False, "Data BTT masih kosong, tidak ada yang dapat diekspor."
+
+    try:
+        # 1. Salin dan ubah nama kolom sesuai skema database SQL
+        df_sql = df_btt.copy()
+        df_sql = df_sql.rename(columns=BTT_TO_SQL_MAP)
+
+        # Ambil hanya kolom yang terdaftar di database
+        valid_cols = [col for col in BTT_TO_SQL_MAP.values() if col in df_sql.columns]
+        df_sql = df_sql[valid_cols]
+
+        # 2. Penyesuaian tipe data angka & tanggal
+        for int_col in ["age", "idn", "child_under_5", "child_6_11", "child_12_17"]:
+            if int_col in df_sql.columns:
+                df_sql[int_col] = pd.to_numeric(df_sql[int_col], errors="coerce").fillna(0).astype(int)
+
+        if "activity_date" in df_sql.columns:
+            df_sql["activity_date"] = pd.to_datetime(df_sql["activity_date"], errors="coerce").dt.date
+
+        # Ganti nilai kosong/NA menjadi None agar masuk sebagai NULL di database
+        df_sql = df_sql.replace({pd.NA: None, float("nan"): None, "": None})
+
+        # 3. Buat engine koneksi
+        conn_str = f"mysql+pymysql://{user}:{password}@{host}:{port}/{db_name}"
+        engine = create_engine(conn_str)
+
+        # 4. Simpan ke database
+        df_sql.to_sql(
+            name=table_name,
+            con=engine,
+            if_exists="append",
+            index=False,
+            chunksize=500
+        )
+        return True, f"Berhasil menyimpan {len(df_sql)} baris data ke tabel `{table_name}` di database `{db_name}`."
+
+    except Exception as e:
+        return False, f"Gagal mengekspor ke MariaDB: {str(e)}"
