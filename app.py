@@ -36,6 +36,7 @@ from data_processor import (
     add_participant_profile_columns,
     to_csv_bytes,
     to_excel_bytes,
+    export_btt_to_mariadb,
 )
 from services.workflow_service import (
     STEPS,
@@ -139,12 +140,7 @@ def render_sidebar() -> float:
 # LANGKAH ①: MUAT DATA
 # =========================================================
 def _render_kobo_api_form() -> None:
-    """Form untuk menarik data langsung dari KoboToolbox API, dengan preset Area Program.
-
-    Token & Asset UID diambil dari st.secrets (lihat config.py bagian 4/4b) —
-    memilih AP di dropdown otomatis mengisi token+UID khusus AP itu (kalau
-    diisi di secrets.toml), atau fallback ke token/UID default.
-    """
+    """Form untuk menarik data langsung dari KoboToolbox API, dengan preset Area Program."""
     ap_options = ["(Manual)"] + list(config.AP_ASSET_MAP.keys())
     selected_ap = st.selectbox(
         "Area Program",
@@ -171,9 +167,6 @@ def _render_kobo_api_form() -> None:
     with st.form("load_kobo_form"):
         col1, col2 = st.columns(2)
         with col1:
-            # key disertakan `selected_ap` supaya nilai default (termasuk token)
-            # ikut ter-refresh setiap kali AP diganti, bukan menyimpan input
-            # lama dari AP sebelumnya.
             api_token = st.text_input(
                 "API Token", value=default_token, type="password", key=f"token_{selected_ap}"
             )
@@ -305,9 +298,6 @@ def _run_full_check(df_login: pd.DataFrame, df_register: pd.DataFrame, threshold
 
         status.info("Memeriksa peserta Register yang belum memiliki Login...")
         progress.progress(95, text="Memeriksa kelengkapan Login...")
-        # PENTING: urutan argumen harus (df_login, df_register) — jangan ditukar,
-        # karena fungsi ini event-aware dan membaca df_login sebagai sumber
-        # kebenaran "siapa yang sudah absen di kegiatan apa".
         not_logged = find_registered_not_logged_in(df_login, df_register, threshold=threshold)
 
         st.session_state[config.SS_DUPLICATE_PAIRS_LOGIN] = dup_login
@@ -469,9 +459,6 @@ def render_review_register_step() -> None:
     pair = remaining.iloc[idx]
 
     def decide(decision: str) -> None:
-        # resolve_register_duplicate menjalankan flowchart lengkap: hapus salah
-        # satu duplikat, tentukan "acara terbaru" di antara pasangan, lalu
-        # auto-append ke Login bila acara tsb belum tercatat di sana.
         df_login_new, df_register_new, info = resolve_register_duplicate(
             st.session_state[config.SS_LOGIN_DF],
             st.session_state[config.SS_REGISTER_DF],
@@ -523,7 +510,6 @@ def _render_pending_login_section(df_login: pd.DataFrame, df_register: pd.DataFr
     """Bagian 'Peserta Register yang Belum Login' pada langkah Finalisasi."""
     st.subheader("Peserta Register yang Belum Login")
 
-    # Hitung ulang dari data terbaru supaya daftar merefleksikan keputusan review.
     if st.button("🔄 Perbarui Daftar Belum Login"):
         st.session_state[config.SS_NOT_LOGIN_YET] = find_registered_not_logged_in(
             df_login, df_register, threshold=threshold
@@ -654,27 +640,15 @@ def _build_btt_sheet(df_login: pd.DataFrame, df_register: pd.DataFrame, metadata
     + kolom profil peserta (ID, Full Name, Household Name, Sex, Age, Age group,
     Category, dst — diambil dari Register via custom_id) + metadata project
     (di-duplicate ke seluruh baris) + Output Code.
-
-    Sheet BTT HANYA berisi kolom-kolom berikut, persis urutan ini (tidak ada
-    kolom audit/mentah lain yang ikut terbawa). Sel yang kosong diisi NaN
-    (bukan string kosong "") supaya konsisten saat dibuka di Excel.
     """
-    # Date / Month / Fiscal Year dihitung dari tanggal_kegiatan (Login).
     df_btt = add_fiscal_columns(df_login, date_column="tanggal_kegiatan")
-
-    # "Month (First)" = bulan fiskal saat custom_id ini PERTAMA KALI muncul di
-    # Register (exact match by custom_id, lihat data_processor.add_month_first_column).
     df_btt = add_month_first_column(df_btt, df_register, date_column="tanggal_kegiatan")
-
-    # Enrichment peserta/profil/program dari Register dengan lookup ID -> Full Name.
-    # Kolom MVC, Social Protection, Age group, dan Category dihitung setelah enrichment.
     df_btt = add_participant_profile_columns(df_btt, df_register)
 
     for field, value in metadata.items():
         df_btt[field] = value
     df_btt["Output Code"] = _extract_output_code(metadata.get("Activity Code", ""))
 
-    # Urutan kolom RESMI & FINAL sheet BTT — TIDAK ADA kolom lain di luar daftar ini.
     BTT_COLUMNS = [
         "Implementor", "Sector", "CPM", "Project", "Project Category",
         "Output Code", "Activity Code", "Activity", "Activity Detail",
@@ -696,9 +670,6 @@ def _build_btt_sheet(df_login: pd.DataFrame, df_register: pd.DataFrame, metadata
             df_btt[col] = pd.NA
 
     df_btt = df_btt[BTT_COLUMNS].copy()
-
-    # Sel kosong/blank -> NaN (bukan string kosong ""), supaya tampil sebagai
-    # sel kosong murni saat dibuka di Excel, bukan teks "" atau spasi.
     df_btt = df_btt.replace(r"^\s*$", pd.NA, regex=True)
 
     return df_btt
@@ -710,12 +681,6 @@ def render_export_step() -> None:
     df_register = st.session_state[config.SS_REGISTER_DF].copy()
     metadata = st.session_state[config.SS_PROJECT_METADATA]
 
-    # Peringatan: BTT (khususnya kolom profil dari Register: Household Name,
-    # Sex, Age, MVC, dst.) hanya AKURAT kalau Register sudah benar-benar unik
-    # (tidak ada duplikat tersisa). Kalau masih ada pasangan yang belum
-    # direview, satu orang bisa saja masih punya >1 baris Register — sistem
-    # akan mengambil data dari salah satunya secara sembarang (lihat catatan
-    # di resolve_register_duplicate / _build_register_profile_lookup).
     login_pairs = st.session_state[config.SS_DUPLICATE_PAIRS_LOGIN]
     register_pairs = st.session_state[config.SS_DUPLICATE_PAIRS_REGISTER]
     login_done = all_reviewed(login_pairs, st.session_state[config.SS_REVIEW_DECISIONS_LOGIN])
@@ -771,6 +736,35 @@ def render_export_step() -> None:
     st.divider()
     with st.expander("Preview BTT"):
         st.dataframe(df_btt.head(20), use_container_width=True, hide_index=True)
+
+    # --- Tambahan UI Export Database di render_export_step() ---
+    st.divider()
+    st.subheader("💾 Export ke Database Lokal (MariaDB / XAMPP)")
+    
+    col_db1, col_db2 = st.columns([2, 1])
+    with col_db1:
+        st.caption(
+            f"Target Server: **{config.DB_HOST}:{config.DB_PORT}** | "
+            f"Database: **{config.DB_NAME}** | "
+            f"Tabel: **{config.DB_TABLE}**"
+        )
+    with col_db2:
+        if st.button("🚀 Simpan Data ke MariaDB", type="primary", use_container_width=True):
+            with st.spinner("Menghubungkan dan mengekspor ke MariaDB..."):
+                success, msg = export_btt_to_mariadb(
+                    df_btt=df_btt,
+                    host=config.DB_HOST,
+                    port=config.DB_PORT,
+                    user=config.DB_USER,
+                    password=config.DB_PASSWORD,
+                    db_name=config.DB_NAME,
+                    table_name=config.DB_TABLE,
+                )
+                if success:
+                    st.success(f"✅ {msg}")
+                else:
+                    st.error(f"❌ {msg}")
+    # -----------------------------------------------------------
 
     if st.button("🔄 Mulai Proses Baru"):
         go_to("load")
