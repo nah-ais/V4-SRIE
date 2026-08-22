@@ -284,9 +284,13 @@ BTT_REGISTER_FIELD_ALIASES = {
     "Disability Status": [
         "disability_status", "Disability Status", "status_disabilitas",
         "status disabilitas", "disability status",
+        "tipe_disabilitas", "Apakah_Anda_memiliki_kebutuhan",
+        "apakah anda memiliki kebutuhan",
     ],
     "RC": [
         "rc", "RC", "relational_capital", "relational capital",
+        "Apakah_wakil_anak_Ya_Tidak", "apakah_wakil_anak_ya_tidak",
+        "wakil_anak",
     ],
     "RC Status": [
         "rc_status", "RC Status", "status_rc", "status rc", "rc status", "IDN RC Status",
@@ -294,21 +298,18 @@ BTT_REGISTER_FIELD_ALIASES = {
     "IDN": [
         "idn", "IDN", "idn_status", "IDN Status", "idn status",
     ],
-    "MVC- Dimensi 1": [
-        "mvc_dimensi_1", "MVC- Dimensi 1", "MVC Dimensi 1", "mvc_1", "mvc1",
-        "mvc dimensi 1",
-    ],
-    "MVC- Dimensi 2": [
-        "mvc_dimensi_2", "MVC- Dimensi 2", "MVC Dimensi 2", "mvc_2", "mvc2",
-        "mvc dimensi 2",
-    ],
-    "MVC- Dimensi 3": [
-        "mvc_dimensi_3", "MVC- Dimensi 3", "MVC Dimensi 3", "mvc_3", "mvc3",
-        "mvc dimensi 3",
-    ],
-    "MVC- Dimensi 4": [
-        "mvc_dimensi_4", "MVC- Dimensi 4", "MVC Dimensi 4", "mvc_4", "mvc4",
-        "mvc dimensi 4",
+    # 4 kolom "MVC- Dimensi ..." SENGAJA TIDAK dicari sebagai kolom terpisah di
+    # sini — nilainya dihitung dari jawaban gabungan "_MVC_Raw" via substring
+    # match (MVC_MARKERS), sama seperti pola SP - Raw. Field mentah aktual:
+    # SATU pertanyaan multi-select "Apakah anak/keluarga ini termasuk rentan
+    # atau membutuhkan perhatian khusus?" (nama kolom: Apakah_anak_keluarga_i_kerenta).
+    "_MVC_Raw": [
+        "Apakah_anak_keluarga_i_kerenta", "apakah_anak_keluarga_i_kerenta",
+        "mvc_raw", "kerentanan_anak", "kategori_kerentanan",
+        # Nama kolom mentah PERSIS dikonfirmasi pengguna (path grup Kobo lengkap).
+        "group_digital_absensi/group_ys2ge24/group_cn7re50/Apakah_anak_keluarga_i_kerenta",
+        # Header breadcrumb PERSIS (format ekspor LABEL Kobo).
+        "DIGITAL ABSENSI / ANAK / INFORMASI LAINNYA / Apakah anak/keluarga Anda mengalami salah satu kondisi kerentanan berikut?",
     ],
     "SP - Cash transfers/food assistance": [
         "sp_cash_transfers", "SP - Cash transfers/food assistance",
@@ -321,6 +322,20 @@ BTT_REGISTER_FIELD_ALIASES = {
     "SP - Education Assistance": [
         "sp_education_assistance", "SP - Education Assistance", "education_assistance",
         "sp_education", "education assistance",
+    ],
+    # Field mentah Kobo AKTUAL: SATU pertanyaan multi-select ("Apakah Anda/keluarga
+    # menerima bantuan sosial berikut?") yang jawabannya berisi GABUNGAN label
+    # pilihan yang dicentang, dipisah koma, mis.:
+    #   "Layanan kesehatan (KIS, BPJS Kesehatan, Kartu Disabilitas), Bantuan
+    #    pendidikan (PIP, Sekolah Rakyat, KJP)"
+    # Karena label opsi itu SENDIRI mengandung koma di dalam kurung, split by
+    # comma TIDAK BISA dipakai untuk memisahkan antar pilihan — deteksi per
+    # kategori dilakukan dengan substring match (lihat _sp_flag / SP_MARKERS).
+    "_SP_Raw": [
+        "Bantuan_Proteksi_Sos_erima_dal",
+        "bantuan_sosial", "proteksi_sosial", "social_protection",
+        "bantuan_yang_diterima", "jenis_bantuan_sosial", "sp_raw",
+        "apakah_anda_atau_keluarga_menerima_bantuan",
     ],
     "Institution": ["institution", "Institution", "instansi"],
     "Position": ["position", "Position", "jabatan"],
@@ -342,13 +357,97 @@ BTT_REGISTER_FIELD_ALIASES = {
     ],
 }
 
+# Penanda (substring, dicek case-insensitive) untuk tiap kategori bantuan
+# proteksi sosial di dalam jawaban gabungan (_SP_Raw). Dicocokkan dengan
+# `in` (containment), BUKAN comma-split, karena label opsi sendiri
+# mengandung koma di dalam tanda kurung.
+MVC_MARKERS = {
+    "MVC- Dimensi 1": [
+        "kesulitan ekonomi", "sulit makan", "bayar sekolah", "permukiman padat",
+        "bantaran kali", "anak harus bekerja", "tidak punya pengasuh",
+    ],
+    "MVC- Dimensi 2": [
+        "diperlakukan berbeda", "dikucilkan", "dijauhi", "suku/agama",
+        "ktp/akta lahir", "akta lahir", "anak bermasalah",
+    ],
+    "MVC- Dimensi 3": [
+        "mengalami kekerasan", "dimanfaatkan orang lain", "dipukul", "disakiti",
+        "dilecehkan", "dipaksa bekerja", "dinikahkan dini", "narkoba", "zat adiktif",
+    ],
+    "MVC- Dimensi 4": [
+        "terdampak bencana", "lokasi berisiko", "kena banjir", "kebakaran",
+        "mengungsi", "konflik", "pengusiran", "sering kena bencana",
+    ],
+}
+
+
+def _mvc_flag(raw_text, markers: list[str]) -> str:
+    """'Yes' jika salah satu marker (substring, case-insensitive) ditemukan di
+    dalam jawaban gabungan _MVC_Raw, selain itu 'No'."""
+    if _is_empty(raw_text):
+        return "No"
+    text = str(raw_text).strip().lower()
+    return "Yes" if any(marker.lower() in text for marker in markers) else "No"
+
+
+SP_MARKERS = {
+    "SP - Cash transfers/food assistance": [
+        "transfer tunai", "bantuan pangan", "pkh", "blt", "bpnt", "sembako desa",
+    ],
+    "SP - Health assistance": [
+        "layanan kesehatan", "kis", "bpjs kesehatan", "kartu disabilitas",
+    ],
+    "SP - Education Assistance": [
+        "bantuan pendidikan", "pip", "sekolah rakyat", "kjp",
+    ],
+}
+
+
+def _sp_flag(raw_text, markers: list[str]) -> str:
+    """
+    'Yes' jika salah satu marker (substring, case-insensitive) ditemukan di
+    dalam jawaban gabungan _SP_Raw, selain itu 'No'. Aman terhadap jawaban
+    yang label opsinya digabung dengan koma (tidak pakai comma-split).
+    """
+    if _is_empty(raw_text):
+        return "No"
+    text = str(raw_text).strip().lower()
+    return "Yes" if any(marker.lower() in text for marker in markers) else "No"
+
+
 _SEX_LABEL_MAP = {
     "laki-laki": "Male",
     "laki laki": "Male",
+    "laki_laki": "Male",  # nilai XML asli Kobo pakai underscore, bukan strip/spasi
     "male": "Male",
     "perempuan": "Female",
     "female": "Female",
 }
+
+# Standarisasi jawaban Ya/Tidak generik (dipakai untuk 'Disability Status' dari
+# field 'Apakah Anda memiliki kebutuhan...' dan 'RC' dari field
+# 'Apakah wakil anak Ya/Tidak') menjadi Yes/No untuk BTT.
+_YA_TIDAK_LABEL_MAP = {
+    "ya": "Yes",
+    "yes": "Yes",
+    "y": "Yes",
+    "tidak": "No",
+    "no": "No",
+    "n": "No",
+}
+
+
+def _ya_tidak_label(raw_value) -> str:
+    """'Ya' -> 'Yes', 'Tidak' -> 'No'. Nilai lain/tak dikenal dikembalikan apa adanya."""
+    if _is_empty(raw_value):
+        return ""
+    key = str(raw_value).strip().lower()
+    return _YA_TIDAK_LABEL_MAP.get(key, str(raw_value).strip())
+
+
+# Alias lama dipertahankan supaya kode lain yang mungkin masih memanggilnya
+# (mis. referensi eksternal) tetap berfungsi tanpa perubahan.
+_disability_status_label = _ya_tidak_label
 
 
 def _age_group_label(age) -> str:
@@ -409,23 +508,62 @@ def _first_non_empty(values):
     return ""
 
 
+def _column_has_data(df: pd.DataFrame, col: str) -> bool:
+    """True jika kolom `col` punya minimal satu nilai yang TIDAK kosong."""
+    return not df[col].map(_is_empty).all()
+
+
 def _resolve_register_column(df: pd.DataFrame, aliases: list[str]) -> str | None:
-    """Cari field Register dengan exact normalized match lalu token match."""
+    """
+    Cari field Register dengan exact normalized match lalu token match.
+
+    PENTING: kobo_api.py selalu membuat kolom placeholder KOSONG (NA) untuk
+    setiap target di REGISTER_COLUMN_MAP yang headernya tidak ditemukan persis
+    di file/response asli (mis. 'tipe_disabilitas' kalau header CSV memakai
+    nama pendek 'Apakah_Anda_memiliki_kebutuhan' tanpa path group lengkap).
+    Placeholder kosong ini TIDAK BOLEH "menutupi" kolom lain yang alias-nya
+    lebih belakangan di daftar tapi justru punya data asli — karena itu,
+    exact-match TIDAK langsung berhenti di alias pertama yang ketemu; ia akan
+    lanjut mencari alias berikutnya jika kolom yang ketemu ternyata kosong
+    semua, dan baru fallback ke kolom kosong itu di akhir jika memang tidak
+    ada satu pun kandidat yang berisi data.
+    """
     if df.empty:
         return None
 
     normalized = {_normalize_field_name(col): col for col in df.columns}
     alias_norms = [_normalize_field_name(alias) for alias in aliases]
 
-    # 1) exact match
+    # 1) exact match — prioritaskan kandidat yang benar-benar punya data;
+    #    simpan kandidat kosong sebagai fallback terakhir.
+    empty_fallback = None
     for alias in alias_norms:
         if alias in normalized:
-            return normalized[alias]
+            col = normalized[alias]
+            if _column_has_data(df, col):
+                return col
+            if empty_fallback is None:
+                empty_fallback = col
 
     # 2) contains all token kelompok alias (berguna untuk path Kobo panjang)
+    #    — sama, prioritaskan kandidat yang punya data.
+    #    PENTING: token BENAR-BENAR pendek (1 huruf, mis. "i") DIBUANG dari
+    #    syarat pencocokan — token sependek itu hampir pasti muncul sebagai
+    #    substring di HAMPIR SEMUA nama kolom lain, sehingga menyebabkan
+    #    false-positive match ke kolom yang salah sama sekali.
+    #
+    #    TAPI token 2 huruf TETAP DIPERTAHANKAN (mis. "id", "rc", "wa") —
+    #    ini sengaja beda dari sebelumnya (yang sempat membuang token 2
+    #    huruf juga): membuang "id" dari alias seperti "id_peserta" membuat
+    #    syarat cocoknya cuma tersisa "peserta" sendirian, yang gampang salah
+    #    nyantol ke kolom TIDAK TERKAIT sama sekali (mis. "kategori_peserta"
+    #    — kolom kategori peserta, BUKAN kolom ID), sehingga custom_id jadi
+    #    terisi nilai yang salah/berantakan. Karena SEMUA token (termasuk
+    #    yang 2 huruf) tetap harus match BERSAMAAN, risiko false-positive
+    #    tetap rendah selama kombinasi token-nya cukup spesifik.
     candidates = []
     for alias in alias_norms:
-        tokens = [t for t in alias.split("_") if t]
+        tokens = [t for t in alias.split("_") if len(t) >= 2]
         if len(tokens) < 1:
             continue
         for norm_col, original in normalized.items():
@@ -433,9 +571,55 @@ def _resolve_register_column(df: pd.DataFrame, aliases: list[str]) -> str | None
                 candidates.append((len(norm_col), original))
     if candidates:
         candidates.sort(key=lambda x: x[0])
-        return candidates[0][1]
+        for _, col in candidates:
+            if _column_has_data(df, col):
+                return col
+        if empty_fallback is None:
+            empty_fallback = candidates[0][1]
 
-    return None
+    # 3) tidak ada kandidat berisi data -> kembalikan placeholder kosong
+    #    (kalau ada) supaya skema tetap konsisten, atau None kalau memang
+    #    tidak ada satu pun kandidat ditemukan.
+    return empty_fallback
+
+
+def _find_column_by_content_markers(df: pd.DataFrame, all_markers: list[str]) -> str | None:
+    """
+    Cari kolom Register berdasarkan ISI DATA-nya (bukan nama kolom), dengan
+    menghitung berapa baris yang mengandung salah satu frasa penanda
+    (all_markers, dicek case-insensitive, substring).
+
+    PENTING: dipakai untuk field seperti "_MVC_Raw" / "_SP_Raw" ketika file
+    Register diekspor Kobo dalam FORMAT LABEL — header kolomnya berupa
+    breadcrumb pertanyaan panjang (mis. "DIGITAL ABSENSI / ANAK / INFORMASI
+    LAINNYA / Apakah anak/keluarga Anda mengalami salah satu kondisi
+    kerentanan berikut?"), BUKAN nama field XML pendek. Karena breadcrumb ini
+    bisa berbeda-beda tergantung struktur form, pencarian berbasis nama kolom
+    saja tidak cukup andal — mencari berdasarkan ISI jawaban (yang formatnya
+    konsisten, sudah dikonfirmasi oleh pengguna) jauh lebih tahan terhadap
+    variasi header ini.
+
+    Mengembalikan kolom dengan jumlah baris cocok TERBANYAK (mengandung
+    minimal 1 marker), atau None kalau tidak ada kolom yang cocok sama sekali.
+    """
+    if df.empty:
+        return None
+
+    markers_lower = [m.lower() for m in all_markers]
+    best_col = None
+    best_hits = 0
+
+    for col in df.columns:
+        series = df[col]
+        if series.dtype != object and not pd.api.types.is_string_dtype(series):
+            continue
+        text_series = series.fillna("").astype(str).str.lower()
+        hits = text_series.apply(lambda t: any(m in t for m in markers_lower)).sum()
+        if hits > best_hits:
+            best_hits = hits
+            best_col = col
+
+    return best_col if best_hits > 0 else None
 
 
 # Alias field ID kustom mentah dari Kobo (mis. hasil dynamic data attachment
@@ -492,6 +676,26 @@ def _build_register_profile_lookup(df_register: pd.DataFrame):
         field: _resolve_register_column(reg, aliases)
         for field, aliases in BTT_REGISTER_FIELD_ALIASES.items()
     }
+
+    # "_MVC_Raw" & "_SP_Raw": PRIORITASKAN deteksi berbasis ISI DATA (bukan
+    # nama kolom). Alasan: file Register sering diekspor Kobo dalam FORMAT
+    # LABEL — header kolom berupa breadcrumb pertanyaan panjang yang berbeda-
+    # beda (mis. "DIGITAL ABSENSI / ANAK / INFORMASI LAINNYA / Apakah
+    # anak/keluarga Anda mengalami salah satu kondisi kerentanan berikut?"),
+    # sehingga pencarian berbasis nama kolom (alias) berisiko salah menangkap
+    # kolom lain yang sekadar mengandung potongan kata serupa (mis. "anak",
+    # "keluarga"). Isi jawaban jauh lebih spesifik/unik dan sudah dikonfirmasi
+    # formatnya oleh pengguna, sehingga jadi sumber kebenaran utama di sini.
+    # Nama kolom (field_source dari alias di atas) hanya dipakai sebagai
+    # fallback TERAKHIR kalau deteksi berbasis isi data sama sekali tidak
+    # menemukan kolom yang cocok.
+    all_mvc_markers = [m for markers in MVC_MARKERS.values() for m in markers]
+    mvc_content_col = _find_column_by_content_markers(reg, all_mvc_markers)
+    field_source["_MVC_Raw"] = mvc_content_col or field_source.get("_MVC_Raw")
+
+    all_sp_markers = [m for markers in SP_MARKERS.values() for m in markers]
+    sp_content_col = _find_column_by_content_markers(reg, all_sp_markers)
+    field_source["_SP_Raw"] = sp_content_col or field_source.get("_SP_Raw")
 
     reg["_profile_id_key"] = reg[id_col].map(_norm_identity) if id_col else ""
     reg["_profile_name_key"] = reg[name_col].map(_norm_identity) if name_col else ""
@@ -551,29 +755,60 @@ def add_participant_profile_columns(df_login: pd.DataFrame, df_register: pd.Data
         "Household Name", "Sex", "Age",
         "Disability Category", "Disability Status",
         "RC", "RC Status", "IDN",
-        "MVC- Dimensi 1", "MVC- Dimensi 2", "MVC- Dimensi 3", "MVC- Dimensi 4",
-        "SP - Cash transfers/food assistance", "SP - Health assistance", "SP - Education Assistance",
         "Institution", "Position", "No.Handphone (WA)",
         "# Child <5", "# Child 6-11", "# Child 12-17",
     ]
+    # NOTE: 3 kolom "SP - ..." dan 4 kolom "MVC- Dimensi ..." SENGAJA TIDAK ada
+    # di daftar di atas — nilainya dihitung terpisah di bawah dari jawaban
+    # gabungan "_SP_Raw" / "_MVC_Raw" via _sp_flag()/_mvc_flag(), karena field
+    # mentahnya SATU pertanyaan multi-select (label pilihan digabung koma),
+    # bukan kolom yes/no terpisah per kategori.
 
     for field in register_output_fields:
         df[field] = [_first_non_empty([profile.get(field, "")]) for profile in profiles]
 
+    # Deteksi 3 kategori bantuan proteksi sosial dari jawaban gabungan
+    # "_SP_Raw" via substring match (SP_MARKERS) — bukan comma-split, karena
+    # label opsi itu sendiri mengandung koma di dalam kurung.
+    sp_raw_values = [profile.get("_SP_Raw", "") for profile in profiles]
+    for field, markers in SP_MARKERS.items():
+        df[field] = [_sp_flag(raw, markers) for raw in sp_raw_values]
+
+    # Deteksi 4 dimensi kerentanan (MVC) dari jawaban gabungan "_MVC_Raw" via
+    # substring match (MVC_MARKERS) — sama alasannya dengan SP di atas.
+    mvc_raw_values = [profile.get("_MVC_Raw", "") for profile in profiles]
+    for field, markers in MVC_MARKERS.items():
+        df[field] = [_mvc_flag(raw, markers) for raw in mvc_raw_values]
+
     # Standarisasi Sex: Laki-laki -> Male, Perempuan -> Female.
     df["Sex"] = df["Sex"].apply(_sex_label)
+
+    # Standarisasi Disability Status: Ya -> Yes, Tidak -> No.
+    df["Disability Status"] = df["Disability Status"].apply(_ya_tidak_label)
+
+    # Standarisasi RC: Ya -> Yes, Tidak -> No (field 'Apakah wakil anak Ya/Tidak').
+    df["RC"] = df["RC"].apply(_ya_tidak_label)
 
     # Derived fields
     df["Age group"] = df["Age"].apply(_age_group_label)
     df["Category"] = df["Age"].apply(_category_label)
 
+    # MVC = Yes jika total dimensi Yes (MVC- Dimensi 1..4) >= 2.
+    # ATURAN TAMBAHAN: peserta PEREMPUAN (Sex == Female) dapat +1 mark bonus,
+    # TAPI HANYA jika minimal 1 dimensi sudah Yes (bonus tidak berlaku kalau
+    # tidak ada satu pun dimensi yang tercentang). Jadi perempuan dengan
+    # 1 dimensi Yes -> 1 (asli) + 1 (bonus perempuan) = 2 -> MVC jadi Yes.
     mvc_fields = [
         "MVC- Dimensi 1", "MVC- Dimensi 2", "MVC- Dimensi 3", "MVC- Dimensi 4"
     ]
-    df["MVC"] = df.apply(
-        lambda row: "Yes" if sum(_yes(row.get(field, "")) for field in mvc_fields) >= 2 else "No",
-        axis=1,
-    )
+
+    def _mvc_final(row) -> str:
+        dimension_count = sum(_yes(row.get(field, "")) for field in mvc_fields)
+        if dimension_count >= 1 and str(row.get("Sex", "")).strip().lower() == "female":
+            dimension_count += 1
+        return "Yes" if dimension_count >= 2 else "No"
+
+    df["MVC"] = df.apply(_mvc_final, axis=1)
 
     sp_fields = [
         "SP - Cash transfers/food assistance",
